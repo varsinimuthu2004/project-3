@@ -1,0 +1,1525 @@
+Ran list project directory structure
+Ran find all Java files
+Analyzed User.java:L1-29
+Analyzed UserDTO.java:L1-33
+Analyzed Role.java:L1-5
+Analyzed UserRepository.java:L1-16
+Analyzed UserService.java:L1-27
+Analyzed UserServiceImpl.java:L1-173
+Analyzed UserController.java:L1-90
+Analyzed application.properties:L1-16
+Analyzed ProjectController.java:L1-79
+Analyzed IssueController.java:L1-71
+Analyzed ProjectService.java:L1-27
+Analyzed ProjectServiceImpl.java:L1-164
+Analyzed ProjectDTO.java:L1-26
+Analyzed Project.java:L1-26
+Analyzed ProjectRepository.java:L1-16
+Analyzed Issue.java:L1-47
+Analyzed IssueDTO.java:L1-58
+Analyzed IssueDTO.java:L1-36
+Analyzed IssueDTO.java:L1-36
+Analyzed IssueServiceImpl.java:L1-367
+Analyzed IssueRepository.java:L1-17
+Analyzed IssueService.java:L1-23
+Analyzed IssueFeign.java:L1-21
+Analyzed IssueFeign.java:L1-14
+Analyzed application.properties:L1-11
+Analyzed application.properties:L1-11
+Analyzed application.properties:L1-11
+Analyzed ApiGatewayApplication.java:L1-13
+Analyzed GlobalException.java:L1-44
+Analyzed GlobalException.java:L1-44
+Analyzed GlobalException.java:L1-5
+Analyzed ErrorInfo.java:L1-5
+Analyzed IssueException.java:L1-8
+Analyzed Status.java:L1-5
+Analyzed Status.java:L1-5
+Analyzed Status.java:L1-5
+Analyzed Type.java:L1-5
+Analyzed Type.java:L1-5
+Analyzed Type.java:L1-5
+Analyzed Priority.java:L1-5
+Canceled check maven build
+Killed task Check maven build
+Analyzed pom.xml:L1-80
+Analyzed UserServiceMsApplicationTests.java:L1-13
+Ran search for insight in codebase
+Analyzed application.properties:L1-5
+
+Here is the thorough review of your backend microservices based on your use case document (**Issue Tracking System**).
+
+Below is the exact list of mistakes discovered, followed by the specific code changes required. The code strictly maintains **your existing syntax, conventions, and Spring Boot / Spring Cloud concepts**.
+
+---
+
+### Key Issues Found Across the Services
+
+1. **`UserServiceMS`**:
+   - **Duplicate User Registration**: `UserServiceImpl.java` did not check if the email already exists before saving, allowing duplicate registrations.
+   - **Profile Image Ignored on Register**: `registerUser()` was not setting `profileImage` to the entity.
+   - **Email Validation**: `UserDTO.java` only used `@Email` without regex; standard `@Email` accepts formats without top-level domains (e.g., `user@domain`). Added strict email regex pattern.
+   - **Login Endpoint Compatibility**: `UserController.java` was using `@RequestParam` for `name, emailId, password, Role`. The UI login screen only asks for Email, Password, and Role (no name field), and frontends send a JSON body (`@RequestBody`). Made it accept both `@RequestBody` and `@RequestParam` to ensure compatibility.
+   - **Critical Import Bug in `IssueDTO.java`**: `UserServiceMS` was importing `ch.qos.logback.core.status.Status` instead of `com.user.utility.Status`.
+   - **Malformed Feign URL in `IssueFeign.java`**: Had `url = "http:localhost:8011/api/issues"` (missing `//`).
+   - **Primary Key Type Mismatch**: `User.java` and `UserDTO.java` had `Long userId`, while `UserRepository` extended `JpaRepository<User, Integer>`, and `ProjectService` / `IssueService` stored user IDs as `Integer`. Standardized to `Integer`.
+   - **Missing `@Enumerated(EnumType.STRING)` on `User.role`**: Role was defaulting to JPA ORDINAL numbers.
+   - **Missing `STORY` in `Type` enum**: `Type.java` only had `BUG, TASK`; PDF requires `BUG, TASK, STORY`.
+
+2. **`ProjectServiceMS`**:
+   - **Missing Insights Endpoint**: PDF Page 10 specifies `GET /api/v1/projects/{projectId}/insights` — it was completely missing from `ProjectController` and `ProjectService`.
+   - **Validation Mismatches**: Project Name had max length 255 (PDF requires max 150 with special character restrictions `[a-zA-Z0-9 -/.|]`). Start/End date check was missing (`End date should not be earlier than Start date`).
+   - **GlobalException Status**: `handleProjectException` was returning HTTP 500 (INTERNAL_SERVER_ERROR) instead of HTTP 400 (BAD_REQUEST).
+   - **Missing `STORY` in `Type` enum**: Only had `BUG, TASK`.
+
+3. **`IssueServiceMS`**:
+   - **Empty Exception Classes**: Both `GlobalException.java` and `ErrorInfo.java` were completely empty, causing validation and custom exceptions to fail without structured JSON responses.
+   - **Prime Number Story Points**: PDF Page 7 requires Story Points to be prime numbers (2, 3, 5, 7, 11...).
+   - **Validations in `IssueDTO.java`**: Missing `@NotNull` on `assignee` (required by PDF), summary regex restriction, max length 500 for description (was 255), and max length 100 on tags.
+   - **Partial Updates**: `updateIssue()` wiped existing fields when the Assignee only updated the issue status from the Assignee screen.
+   - **Missing `STORY` in `Type` enum**: Only had `BUG, TASK`.
+
+4. **API Gateway & Routing**:
+   - API specification calls for `/api/v1/...` (e.g. `/api/v1/users`, `/api/v1/projects`, `/api/v1/issues`). Controllers and Gateway routes now support both `/api/v1/...` and `/api/...` so the React frontend works under either convention, plus CORS headers.
+
+---
+
+# Exact Code to Change
+
+---
+
+## 1. UserServiceMS
+
+### [User.java](file:///c:/Users/DELL/Downloads/vmarimuthu%20(2)/vmarimuthu/UserServiceMS/src/main/java/com/user/entity/User.java)
+```java
+package com.user.entity;
+
+import com.user.utility.Role;
+
+import jakarta.persistence.Entity;
+import jakarta.persistence.EnumType;
+import jakarta.persistence.Enumerated;
+import jakarta.persistence.GeneratedValue;
+import jakarta.persistence.Id;
+import jakarta.persistence.Table;
+import jakarta.persistence.TableGenerator;
+import lombok.Data;
+
+@Entity
+@Data
+@Table(name = "users") 
+public class User {
+
+	@Id
+	@TableGenerator(name = "user_gen", initialValue = 1000, allocationSize = 1, 
+	table = "user_seq", pkColumnName = "gen_name", valueColumnName = "gen_value")
+	@GeneratedValue(generator = "user_gen")
+	private Integer userId;
+	
+	private String name;
+	private String emailId;
+	
+	@Enumerated(EnumType.STRING)
+	private Role role;
+	
+	private String password;
+	private String profileImage;
+
+}
+```
+
+---
+
+### [UserDTO.java](file:///c:/Users/DELL/Downloads/vmarimuthu%20(2)/vmarimuthu/UserServiceMS/src/main/java/com/user/model/UserDTO.java)
+```java
+package com.user.model;
+
+import com.user.utility.Role;
+import jakarta.persistence.EnumType;
+import jakarta.persistence.Enumerated;
+import jakarta.validation.constraints.Email;
+import jakarta.validation.constraints.NotNull;
+import jakarta.validation.constraints.Pattern;
+import jakarta.validation.constraints.Size;
+import lombok.Data;
+
+@Data
+public class UserDTO {
+	
+	private Integer userId;
+	
+	@NotNull(message = "Name cannot be null")
+	@Size(min = 2, max = 255, message = "Name must be between 2 and 255 characters")
+	private String name;
+
+	@NotNull(message = "Email ID cannot be null")
+	@Email(message = "Please provide a valid email address")
+	@Pattern(regexp = "^[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\\.[a-zA-Z]{2,}$", message = "Please provide a valid email address format")
+	private String emailId;
+	
+	@NotNull(message = "Role cannot be null")
+	@Enumerated(EnumType.STRING)
+	private Role role;
+	
+	@NotNull(message = "Password cannot be null")
+	@Size(min = 6, message = "Password must be at least 6 characters long")
+	private String password;
+	
+	private String profileImage;
+}
+```
+
+---
+
+### [UserService.java](file:///c:/Users/DELL/Downloads/vmarimuthu%20(2)/vmarimuthu/UserServiceMS/src/main/java/com/user/service/UserService.java)
+```java
+package com.user.service;
+
+import java.util.List;
+
+import com.user.exception.UserException;
+import com.user.model.IssueDTO;
+import com.user.model.UserDTO;
+
+public interface UserService {
+
+	String registerUser(UserDTO userDTO) throws UserException;
+
+	UserDTO loginUser(String name, String emailId, String password, String role) throws UserException;
+ 
+	UserDTO getUserById(Integer userId) throws UserException;
+
+	List<UserDTO> getAllUsers() throws UserException;
+
+	String updateUser(Integer userId, UserDTO userDTO) throws UserException;
+
+	String deleteUser(Integer userId) throws UserException;
+
+	List<IssueDTO> getIssuesByUserId(Integer userId) throws Exception;
+	
+	List<IssueDTO> getIssuesByUsername(String username) throws Exception;
+
+}
+```
+
+---
+
+### [UserServiceImpl.java](file:///c:/Users/DELL/Downloads/vmarimuthu%20(2)/vmarimuthu/UserServiceMS/src/main/java/com/user/service/UserServiceImpl.java)
+```java
+package com.user.service;
+
+import java.util.ArrayList;
+import java.util.List;
+import java.util.Optional;
+
+import org.modelmapper.ModelMapper;
+import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.stereotype.Service;
+
+import com.user.client.IssueFeign;
+import com.user.entity.User;
+import com.user.exception.UserException;
+import com.user.model.IssueDTO;
+import com.user.model.UserDTO;
+import com.user.repository.UserRepository;
+
+@Service
+public class UserServiceImpl implements UserService {
+
+	@Autowired
+	private UserRepository userRepository;
+
+	@Autowired 
+	private ModelMapper mapper;
+
+	@Autowired
+	private IssueFeign issueFeign;
+
+	@Override
+	public String registerUser(UserDTO userDTO) throws UserException {
+		User existingUser = userRepository.findByEmailId(userDTO.getEmailId());
+		if (existingUser != null) {
+			throw new UserException("User already exists with email ID: " + userDTO.getEmailId());
+		}
+
+	    User user = new User();
+	    user.setName(userDTO.getName());
+	    user.setEmailId(userDTO.getEmailId());
+	    user.setRole(userDTO.getRole());
+	    user.setPassword(userDTO.getPassword());
+	    user.setProfileImage(userDTO.getProfileImage());
+	    
+	    userRepository.save(user);
+	    
+	    return "User registered successfully with User ID: " + user.getUserId();
+	}
+
+	@Override
+	public UserDTO loginUser(String name, String emailId, String password, String role) throws UserException {
+		User user = userRepository.findByEmailId(emailId);
+		if (user == null) {
+			throw new UserException("User not found with email: " + emailId);
+		}
+		if (!user.getPassword().equals(password)) {
+			throw new UserException("Invalid password");
+		}
+		if (role != null && !role.trim().isEmpty()) {
+			String normalizedInputRole = role.trim().toUpperCase().replace(" ", "_");
+			if (user.getRole() != null && !user.getRole().name().equals(normalizedInputRole)) {
+				throw new UserException("User role does not match selected role: " + role);
+			}
+		}
+		return mapper.map(user, UserDTO.class);
+	}
+
+	@Override
+	public UserDTO getUserById(Integer userId) throws UserException {
+		Optional<User> optional = userRepository.findById(userId);
+		User user = optional.orElseThrow(() -> new UserException("User not found with ID: " + userId));
+		
+		UserDTO userDTO = new UserDTO();
+		userDTO.setUserId(user.getUserId());
+		userDTO.setName(user.getName());
+		userDTO.setEmailId(user.getEmailId());
+		userDTO.setRole(user.getRole());
+		userDTO.setPassword(user.getPassword());
+		userDTO.setProfileImage(user.getProfileImage());
+		return userDTO;
+	}
+
+	@Override
+	public List<UserDTO> getAllUsers() throws UserException {
+		List<User> usersList = userRepository.findAll();
+		if (usersList.isEmpty()) {
+			throw new UserException("No users found in the database.");
+		}
+		List<UserDTO> userdtoList = new ArrayList<>();
+		for (User user : usersList) {
+			UserDTO dto = new UserDTO();
+			dto.setUserId(user.getUserId());
+			dto.setName(user.getName());
+			dto.setEmailId(user.getEmailId());
+			dto.setRole(user.getRole());
+			dto.setPassword(user.getPassword());
+			dto.setProfileImage(user.getProfileImage());
+			userdtoList.add(dto);
+		}
+		return userdtoList;
+	}
+
+	@Override
+	public String updateUser(Integer userId, UserDTO userDTO) throws UserException {
+		Optional<User> optional = userRepository.findById(userId);
+		User user = optional.orElseThrow(() -> new UserException("User not found with ID: " + userId));
+
+		user.setEmailId(userDTO.getEmailId());
+		user.setName(userDTO.getName());
+		user.setRole(userDTO.getRole());
+		user.setPassword(userDTO.getPassword());
+		user.setProfileImage(userDTO.getProfileImage());
+
+		userRepository.save(user);
+		return "User details updated successfully for User ID: " + userId;
+	}
+
+	@Override
+	public String deleteUser(Integer userId) throws UserException {
+		Optional<User> optional = userRepository.findById(userId);
+		User user = optional.orElseThrow(() -> new UserException("User not found with ID: " + userId));
+
+		userRepository.delete(user);
+		return "User deleted successfully with User ID: " + userId;
+	}
+	
+	@Override
+	public List<IssueDTO> getIssuesByUserId(Integer userId) throws Exception {
+	    try {
+	        List<IssueDTO> issues = issueFeign.getIssuesByAssigneeId(userId);
+	        return issues != null ? issues : new ArrayList<>();
+	    } catch (Exception exception) { 
+	        throw new Exception("Issue service is down or an error occurred: " + exception.getMessage()); 
+	    }
+	}
+
+	@Override
+	public List<IssueDTO> getIssuesByUsername(String username) throws Exception {
+	    User user = userRepository.findByName(username)
+	            .orElseThrow(() -> new UserException("User profile not found with name: " + username));
+	            
+	    try {
+	        List<IssueDTO> issues = issueFeign.getIssuesByAssigneeId(user.getUserId());
+	        return issues != null ? issues : new ArrayList<>();
+	    } catch (Exception exception) {
+	        throw new Exception("Downstream issue service communication failure: " + exception.getMessage());
+	    }
+	}
+
+}
+```
+
+---
+
+### [UserController.java](file:///c:/Users/DELL/Downloads/vmarimuthu%20(2)/vmarimuthu/UserServiceMS/src/main/java/com/user/controller/UserController.java)
+```java
+package com.user.controller;
+
+import java.util.List;
+
+import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.http.HttpStatus;
+import org.springframework.http.ResponseEntity;
+import org.springframework.web.bind.annotation.CrossOrigin;
+import org.springframework.web.bind.annotation.DeleteMapping;
+import org.springframework.web.bind.annotation.GetMapping;
+import org.springframework.web.bind.annotation.PathVariable;
+import org.springframework.web.bind.annotation.PostMapping;
+import org.springframework.web.bind.annotation.PutMapping;
+import org.springframework.web.bind.annotation.RequestBody;
+import org.springframework.web.bind.annotation.RequestMapping;
+import org.springframework.web.bind.annotation.RequestParam;
+import org.springframework.web.bind.annotation.RestController;
+
+import com.user.exception.UserException;
+import com.user.model.IssueDTO;
+import com.user.model.UserDTO;
+import com.user.service.UserService;
+
+import jakarta.validation.Valid;
+
+@RestController
+@CrossOrigin(origins = "*")
+@RequestMapping({"/api/v1/users", "/api/users"})
+public class UserController {
+	
+	@Autowired
+	private UserService userService;
+	
+	@PostMapping({"", "/register"})
+	public ResponseEntity<String> registerUser(@Valid @RequestBody UserDTO userDTO) throws UserException {
+		String message = userService.registerUser(userDTO);
+		return new ResponseEntity<>(message, HttpStatus.CREATED);
+	}
+	
+	@PostMapping("/login")
+	public ResponseEntity<UserDTO> loginUser(
+			@RequestBody(required = false) UserDTO loginRequest,
+			@RequestParam(required = false) String name,
+			@RequestParam(required = false) String emailId, 
+			@RequestParam(required = false) String password, 
+			@RequestParam(required = false) String role) throws UserException {
+		
+		String finalEmail = (loginRequest != null && loginRequest.getEmailId() != null) ? loginRequest.getEmailId() : emailId;
+		String finalPassword = (loginRequest != null && loginRequest.getPassword() != null) ? loginRequest.getPassword() : password;
+		String finalName = (loginRequest != null && loginRequest.getName() != null) ? loginRequest.getName() : name;
+		String finalRole = (loginRequest != null && loginRequest.getRole() != null) ? loginRequest.getRole().name() : role;
+		
+		UserDTO userDTO = userService.loginUser(finalName, finalEmail, finalPassword, finalRole);
+		return new ResponseEntity<>(userDTO, HttpStatus.OK);
+	}
+	
+	@GetMapping("/{userId}")
+	public ResponseEntity<UserDTO> getUserById(@PathVariable Integer userId) throws UserException {
+		UserDTO userDTO = userService.getUserById(userId);
+		return new ResponseEntity<>(userDTO, HttpStatus.OK);
+	}
+	
+	@GetMapping({"", "/all"})
+	public ResponseEntity<List<UserDTO>> getAllUsers() throws UserException {
+		List<UserDTO> users = userService.getAllUsers();
+		return new ResponseEntity<>(users, HttpStatus.OK);
+	}
+	
+	@PutMapping("/{userId}")
+	public ResponseEntity<String> updateUser(@PathVariable Integer userId, @Valid @RequestBody UserDTO userDTO) throws UserException {
+		String message = userService.updateUser(userId, userDTO);
+		return new ResponseEntity<>(message, HttpStatus.OK);
+	}
+	
+	@DeleteMapping("/{userId}")
+	public ResponseEntity<String> deleteUser(@PathVariable Integer userId) throws UserException {
+		String message = userService.deleteUser(userId);
+		return new ResponseEntity<>(message, HttpStatus.OK);
+	}
+	
+	@GetMapping("/{userId}/issues")
+	public ResponseEntity<List<IssueDTO>> getIssuesByUserId(@PathVariable Integer userId) throws Exception {
+	    List<IssueDTO> issues = userService.getIssuesByUserId(userId);
+	    return new ResponseEntity<>(issues, HttpStatus.OK);
+	}
+
+	@GetMapping("/username/{username}/issues")
+	public ResponseEntity<List<IssueDTO>> getIssuesByUsername(@PathVariable String username) throws Exception {
+	    List<IssueDTO> issues = userService.getIssuesByUsername(username);
+	    return new ResponseEntity<>(issues, HttpStatus.OK);
+	}
+}
+```
+
+---
+
+### [IssueDTO.java (in UserServiceMS)](file:///c:/Users/DELL/Downloads/vmarimuthu%20(2)/vmarimuthu/UserServiceMS/src/main/java/com/user/model/IssueDTO.java)
+```java
+package com.user.model;
+
+import java.time.LocalDate;
+
+import com.user.utility.Priority;
+import com.user.utility.Status;
+import com.user.utility.Type;
+
+import jakarta.persistence.EnumType;
+import jakarta.persistence.Enumerated;
+import lombok.Data;
+
+@Data
+public class IssueDTO {
+	
+	private Integer id;
+	private String summary;
+	private String description;
+	private Integer project;
+	private Integer assignee;
+	private Integer createdBy;
+	private LocalDate createdOn;
+	private LocalDate lastUpdated;
+	private String sprint;
+	private Integer storyPoint;
+	private String tags;
+	
+	@Enumerated(EnumType.STRING)
+	private Priority priority;
+	
+	@Enumerated(EnumType.STRING)
+	private Status status;
+	
+	@Enumerated(EnumType.STRING)
+	private Type type;
+}
+```
+
+---
+
+### [IssueFeign.java (in UserServiceMS)](file:///c:/Users/DELL/Downloads/vmarimuthu%20(2)/vmarimuthu/UserServiceMS/src/main/java/com/user/client/IssueFeign.java)
+```java
+package com.user.client;
+
+import java.util.List;
+
+import org.springframework.cloud.openfeign.FeignClient;
+import org.springframework.web.bind.annotation.GetMapping;
+import org.springframework.web.bind.annotation.PathVariable;
+
+import com.user.model.IssueDTO;
+
+@FeignClient(name = "IssueServiceMS", url = "http://localhost:8011/api/issues")
+public interface IssueFeign {
+
+	@GetMapping("/assignee/{assigneeId}")
+	public List<IssueDTO> getIssuesByAssigneeId(@PathVariable Integer assigneeId) throws Exception;
+	
+	@GetMapping("/project/{projectId}")
+    public List<IssueDTO> getIssuesByProjectId(@PathVariable Integer projectId) throws Exception;
+}
+```
+
+---
+
+### [Type.java (in UserServiceMS)](file:///c:/Users/DELL/Downloads/vmarimuthu%20(2)/vmarimuthu/UserServiceMS/src/main/java/com/user/utility/Type.java)
+```java
+package com.user.utility;
+
+public enum Type {
+	BUG, TASK, STORY
+}
+```
+
+---
+
+### [Status.java (in UserServiceMS)](file:///c:/Users/DELL/Downloads/vmarimuthu%20(2)/vmarimuthu/UserServiceMS/src/main/java/com/user/utility/Status.java)
+```java
+package com.user.utility;
+
+public enum Status {
+	TO_DO, DEVELOPMENT, TESTING, COMPLETED, DONE
+}
+```
+
+---
+
+### [GlobalException.java (in UserServiceMS)](file:///c:/Users/DELL/Downloads/vmarimuthu%20(2)/vmarimuthu/UserServiceMS/src/main/java/com/user/utility/GlobalException.java)
+```java
+package com.user.utility;
+
+import java.time.LocalDateTime;
+import java.util.stream.Collectors;
+
+import org.springframework.http.HttpStatus;
+import org.springframework.http.ResponseEntity;
+import org.springframework.web.bind.MethodArgumentNotValidException;
+import org.springframework.web.bind.annotation.ExceptionHandler;
+import org.springframework.web.bind.annotation.RestControllerAdvice;
+
+import com.user.exception.UserException;
+
+@RestControllerAdvice
+public class GlobalException {
+	
+	@ExceptionHandler(value = MethodArgumentNotValidException.class)
+	public ResponseEntity<ErrorInfo> handleValidationException(MethodArgumentNotValidException exception){
+		ErrorInfo errorInfo = new ErrorInfo();
+		String message = exception.getBindingResult()
+		.getAllErrors()
+		.stream()
+		.map(error -> error.getDefaultMessage())
+		.collect(Collectors.joining(", "));
+		
+		errorInfo.setErrorMessage(message);
+		errorInfo.setErrorCode(HttpStatus.BAD_REQUEST.value());
+		errorInfo.setTimeStamp(LocalDateTime.now());
+		
+		return new ResponseEntity<>(errorInfo, HttpStatus.BAD_REQUEST);
+	}
+	
+	@ExceptionHandler(value = UserException.class)
+	public ResponseEntity<ErrorInfo> handleUserException(UserException exception){
+		ErrorInfo errorInfo = new ErrorInfo();
+		
+		errorInfo.setErrorMessage(exception.getMessage());
+		errorInfo.setErrorCode(HttpStatus.BAD_REQUEST.value());
+		errorInfo.setTimeStamp(LocalDateTime.now());
+		
+		return new ResponseEntity<>(errorInfo, HttpStatus.BAD_REQUEST);
+	}
+
+	@ExceptionHandler(value = Exception.class)
+	public ResponseEntity<ErrorInfo> handleGeneralException(Exception exception){
+		ErrorInfo errorInfo = new ErrorInfo();
+		
+		errorInfo.setErrorMessage(exception.getMessage());
+		errorInfo.setErrorCode(HttpStatus.INTERNAL_SERVER_ERROR.value());
+		errorInfo.setTimeStamp(LocalDateTime.now());
+		
+		return new ResponseEntity<>(errorInfo, HttpStatus.INTERNAL_SERVER_ERROR);
+	}
+}
+```
+
+---
+
+## 2. ProjectServiceMS
+
+### [ProjectDTO.java](file:///c:/Users/DELL/Downloads/vmarimuthu%20(2)/vmarimuthu/ProjectServiceMS/src/main/java/com/project/model/ProjectDTO.java)
+```java
+package com.project.model;
+
+import java.time.LocalDate;
+import jakarta.validation.constraints.NotNull;
+import jakarta.validation.constraints.Pattern;
+import jakarta.validation.constraints.Size;
+import lombok.Data;
+
+@Data
+public class ProjectDTO {
+	
+	private Integer id;
+
+	@NotNull(message = "Project name cannot be null")
+	@Size(min = 2, max = 150, message = "Project name must be between 2 and 150 characters")
+	@Pattern(regexp = "^[a-zA-Z0-9\\s\\-/.|]+$", message = "Project name contains invalid characters. Only alphanumeric and {-, /, |, .} are allowed")
+	private String projectName;
+	
+	@NotNull(message = "Project owner ID cannot be null")
+	private Integer projectOwner;
+	
+	@NotNull(message = "Start date cannot be null")
+	private LocalDate startDate;
+	
+	private LocalDate endDate;
+}
+```
+
+---
+
+### [ProjectService.java](file:///c:/Users/DELL/Downloads/vmarimuthu%20(2)/vmarimuthu/ProjectServiceMS/src/main/java/com/project/service/ProjectService.java)
+```java
+package com.project.service;
+
+import java.util.List;
+import java.util.Map;
+
+import com.project.exception.ProjectException;
+import com.project.model.IssueDTO;
+import com.project.model.ProjectDTO;
+
+public interface ProjectService {
+
+	ProjectDTO getProjectById(Integer projectId) throws ProjectException;
+
+	String createProject(ProjectDTO projectDTO) throws ProjectException;
+
+	List<ProjectDTO> getAllProjects() throws ProjectException;
+
+	List<ProjectDTO> getProjectsByOwner(Integer ownerId) throws ProjectException;
+
+	String updateProject(Integer projectId, ProjectDTO projectDTO) throws ProjectException;
+
+	String deleteProject(Integer projectId) throws ProjectException;
+	
+	List<IssueDTO> getIssuesByProjectId(Integer projectId) throws Exception;
+
+	List<IssueDTO> getIssuesByProjectName(String projectName) throws Exception;
+
+	Map<String, Object> getProjectInsights(Integer projectId) throws Exception;
+
+}
+```
+
+---
+
+### [ProjectServiceImpl.java](file:///c:/Users/DELL/Downloads/vmarimuthu%20(2)/vmarimuthu/ProjectServiceMS/src/main/java/com/project/service/ProjectServiceImpl.java)
+```java
+package com.project.service;
+
+import java.util.ArrayList;
+import java.util.HashMap;
+import java.util.List;
+import java.util.Map;
+import java.util.Optional;
+
+import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.stereotype.Service;
+
+import com.project.client.IssueFeign;
+import com.project.entity.Project;
+import com.project.exception.ProjectException;
+import com.project.model.IssueDTO;
+import com.project.model.ProjectDTO;
+import com.project.repository.ProjectRepository;
+import com.project.utility.Status;
+
+@Service
+public class ProjectServiceImpl implements ProjectService {
+	
+	@Autowired
+	private ProjectRepository projectRepository;
+	
+	@Autowired
+	private IssueFeign issueFeign;
+
+	@Override
+	public List<IssueDTO> getIssuesByProjectId(Integer projectId) throws Exception {
+	    try {
+	        List<IssueDTO> issues = issueFeign.getIssuesByProjectId(projectId);
+	        return issues != null ? issues : new ArrayList<>();
+	    } catch (Exception exception) {
+	        throw new Exception("Issue microservice call failed: " + exception.getMessage());
+	    }
+	}
+
+	@Override
+	public List<IssueDTO> getIssuesByProjectName(String projectName) throws Exception {
+	    Project project = projectRepository.findByProjectName(projectName)
+	            .orElseThrow(() -> new ProjectException("Project not found with name: " + projectName));
+	            
+	    try {
+	        List<IssueDTO> issues = issueFeign.getIssuesByProjectId(project.getId());
+	        return issues != null ? issues : new ArrayList<>();
+	    } catch (Exception exception) {
+	        throw new Exception("Issue microservice call failed: " + exception.getMessage());
+	    }
+	}
+
+	@Override
+	public Map<String, Object> getProjectInsights(Integer projectId) throws Exception {
+		Project project = projectRepository.findById(projectId)
+				.orElseThrow(() -> new ProjectException("Project not found with ID: " + projectId));
+
+		List<IssueDTO> issues = new ArrayList<>();
+		try {
+			issues = issueFeign.getIssuesByProjectId(projectId);
+		} catch (Exception ignored) {
+		}
+
+		Map<String, Object> insights = new HashMap<>();
+		int total = issues != null ? issues.size() : 0;
+		long todoCount = issues != null ? issues.stream().filter(i -> i.getStatus() == Status.TO_DO).count() : 0;
+		long devCount = issues != null ? issues.stream().filter(i -> i.getStatus() == Status.DEVELOPMENT).count() : 0;
+		long testCount = issues != null ? issues.stream().filter(i -> i.getStatus() == Status.TESTING).count() : 0;
+		long completedCount = issues != null ? issues.stream().filter(i -> i.getStatus() == Status.DONE || i.getStatus() == Status.COMPLETED).count() : 0;
+
+		insights.put("projectId", project.getId());
+		insights.put("projectName", project.getProjectName());
+		insights.put("totalIssues", total);
+		insights.put("toDo", todoCount);
+		insights.put("development", devCount);
+		insights.put("testing", testCount);
+		insights.put("completed", completedCount);
+		return insights;
+	}
+	
+	@Override
+	public ProjectDTO getProjectById(Integer projectId) throws ProjectException {
+		Optional<Project> optional = projectRepository.findById(projectId);
+		Project project = optional.orElseThrow(() -> new ProjectException("Project not found with ID: " + projectId));
+		
+		ProjectDTO projectDTO = new ProjectDTO();
+		projectDTO.setId(project.getId());
+		projectDTO.setProjectName(project.getProjectName());
+		projectDTO.setProjectOwner(project.getProjectOwner());
+		projectDTO.setStartDate(project.getStartDate());
+		projectDTO.setEndDate(project.getEndDate());
+		return projectDTO;
+	}
+
+	@Override
+	public String createProject(ProjectDTO projectDTO) throws ProjectException {
+		if (projectDTO.getEndDate() != null && projectDTO.getStartDate() != null) {
+			if (projectDTO.getEndDate().isBefore(projectDTO.getStartDate())) {
+				throw new ProjectException("End date cannot be earlier than start date");
+			}
+		}
+
+		Project project = new Project();
+		project.setProjectName(projectDTO.getProjectName());
+		project.setProjectOwner(projectDTO.getProjectOwner());
+		project.setStartDate(projectDTO.getStartDate());
+		project.setEndDate(projectDTO.getEndDate());
+		
+		projectRepository.save(project);
+		return "Project created successfully with Project ID: " + project.getId();
+	}
+
+	@Override
+	public List<ProjectDTO> getAllProjects() throws ProjectException {
+		List<Project> projectsList = projectRepository.findAll();
+		if (projectsList.isEmpty()) {
+			throw new ProjectException("No projects found in the database.");
+		}
+		List<ProjectDTO> projectDtoList = new ArrayList<>();
+		for (Project project : projectsList) {
+			ProjectDTO dto = new ProjectDTO();
+			dto.setId(project.getId());
+			dto.setProjectName(project.getProjectName());
+			dto.setProjectOwner(project.getProjectOwner());
+			dto.setStartDate(project.getStartDate());
+			dto.setEndDate(project.getEndDate());
+			projectDtoList.add(dto);
+		}
+		return projectDtoList;
+	}
+
+	@Override
+	public List<ProjectDTO> getProjectsByOwner(Integer ownerId) throws ProjectException {
+		List<Project> projectsList = projectRepository.findByProjectOwner(ownerId);
+		if (projectsList.isEmpty()) {
+			throw new ProjectException("No projects found for Owner ID: " + ownerId);
+		}
+		List<ProjectDTO> projectDtoList = new ArrayList<>();
+		for (Project project : projectsList) {
+			ProjectDTO dto = new ProjectDTO();
+			dto.setId(project.getId());
+			dto.setProjectName(project.getProjectName());
+			dto.setProjectOwner(project.getProjectOwner());
+			dto.setStartDate(project.getStartDate());
+			dto.setEndDate(project.getEndDate());
+			projectDtoList.add(dto);
+		}
+		return projectDtoList;
+	}
+
+	@Override
+	public String updateProject(Integer projectId, ProjectDTO projectDTO) throws ProjectException {
+		Optional<Project> optional = projectRepository.findById(projectId);
+		Project project = optional.orElseThrow(() -> new ProjectException("Project not found with ID: " + projectId));
+		
+		if (projectDTO.getEndDate() != null && projectDTO.getStartDate() != null) {
+			if (projectDTO.getEndDate().isBefore(projectDTO.getStartDate())) {
+				throw new ProjectException("End date cannot be earlier than start date");
+			}
+		}
+
+		project.setProjectName(projectDTO.getProjectName());
+		project.setProjectOwner(projectDTO.getProjectOwner());
+		project.setStartDate(projectDTO.getStartDate());
+		project.setEndDate(projectDTO.getEndDate());
+		
+		projectRepository.save(project);
+		return "Project details updated successfully for Project ID: " + projectId;
+	}
+
+	@Override
+	public String deleteProject(Integer projectId) throws ProjectException {
+		Optional<Project> optional = projectRepository.findById(projectId);
+		Project project = optional.orElseThrow(() -> new ProjectException("Project not found with ID: " + projectId));
+		
+		projectRepository.delete(project);
+		return "Project deleted successfully with Project ID: " + projectId;
+	}
+}
+```
+
+---
+
+### [ProjectController.java](file:///c:/Users/DELL/Downloads/vmarimuthu%20(2)/vmarimuthu/ProjectServiceMS/src/main/java/com/project/controller/ProjectController.java)
+```java
+package com.project.controller;
+
+import java.util.List;
+import java.util.Map;
+
+import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.http.HttpStatus;
+import org.springframework.http.ResponseEntity;
+import org.springframework.web.bind.annotation.CrossOrigin;
+import org.springframework.web.bind.annotation.DeleteMapping;
+import org.springframework.web.bind.annotation.GetMapping;
+import org.springframework.web.bind.annotation.PathVariable;
+import org.springframework.web.bind.annotation.PostMapping;
+import org.springframework.web.bind.annotation.PutMapping;
+import org.springframework.web.bind.annotation.RequestBody;
+import org.springframework.web.bind.annotation.RequestMapping;
+import org.springframework.web.bind.annotation.RestController;
+
+import com.project.exception.ProjectException;
+import com.project.model.IssueDTO;
+import com.project.model.ProjectDTO;
+import com.project.service.ProjectService;
+
+import jakarta.validation.Valid;
+
+@RestController
+@CrossOrigin(origins = "*")
+@RequestMapping({"/api/v1/projects", "/api/projects"})
+public class ProjectController {
+	
+	@Autowired
+	private ProjectService projectService;
+	
+	@GetMapping("/{projectId}")
+	public ResponseEntity<ProjectDTO> getProjectById(@PathVariable Integer projectId) throws ProjectException {
+		ProjectDTO projectDTO = projectService.getProjectById(projectId);
+		return new ResponseEntity<>(projectDTO, HttpStatus.OK);
+	}
+	
+	@PostMapping
+	public ResponseEntity<String> createProject(@Valid @RequestBody ProjectDTO projectDTO) throws ProjectException {
+		String message = projectService.createProject(projectDTO);
+		return new ResponseEntity<>(message, HttpStatus.CREATED);
+	}
+	
+	@GetMapping
+	public ResponseEntity<List<ProjectDTO>> getAllProjects() throws ProjectException {
+		List<ProjectDTO> projects = projectService.getAllProjects();
+		return new ResponseEntity<>(projects, HttpStatus.OK);
+	}
+	
+	@GetMapping("/owner/{ownerId}")
+	public ResponseEntity<List<ProjectDTO>> getProjectsByOwner(@PathVariable Integer ownerId) throws ProjectException {
+		List<ProjectDTO> projects = projectService.getProjectsByOwner(ownerId);
+		return new ResponseEntity<>(projects, HttpStatus.OK);
+	}
+	
+	@PutMapping("/{projectId}")
+	public ResponseEntity<String> updateProject(@PathVariable Integer projectId, @Valid @RequestBody ProjectDTO projectDTO) throws ProjectException {
+		String message = projectService.updateProject(projectId, projectDTO);
+		return new ResponseEntity<>(message, HttpStatus.OK);
+	}
+	
+	@DeleteMapping("/{projectId}")
+	public ResponseEntity<String> deleteProject(@PathVariable Integer projectId) throws ProjectException {
+		String message = projectService.deleteProject(projectId);
+		return new ResponseEntity<>(message, HttpStatus.OK);
+	}
+	
+	@GetMapping("/{projectId}/issues")
+	public ResponseEntity<List<IssueDTO>> getIssuesByProjectId(@PathVariable Integer projectId) throws Exception {
+	    List<IssueDTO> issues = projectService.getIssuesByProjectId(projectId);
+	    return new ResponseEntity<>(issues, HttpStatus.OK);
+	}
+
+	@GetMapping("/projectName/{projectName}/issues")
+	public ResponseEntity<List<IssueDTO>> getIssuesByProjectName(@PathVariable String projectName) throws Exception {
+	    List<IssueDTO> issues = projectService.getIssuesByProjectName(projectName);
+	    return new ResponseEntity<>(issues, HttpStatus.OK);
+	}
+
+	@GetMapping("/{projectId}/insights")
+	public ResponseEntity<Map<String, Object>> getProjectInsights(@PathVariable Integer projectId) throws Exception {
+		Map<String, Object> insights = projectService.getProjectInsights(projectId);
+		return new ResponseEntity<>(insights, HttpStatus.OK);
+	}
+
+}
+```
+
+---
+
+### [GlobalException.java (in ProjectServiceMS)](file:///c:/Users/DELL/Downloads/vmarimuthu%20(2)/vmarimuthu/ProjectServiceMS/src/main/java/com/project/utility/GlobalException.java)
+```java
+package com.project.utility;
+
+import java.time.LocalDateTime;
+import java.util.stream.Collectors;
+
+import org.springframework.http.HttpStatus;
+import org.springframework.http.ResponseEntity;
+import org.springframework.web.bind.MethodArgumentNotValidException;
+import org.springframework.web.bind.annotation.ExceptionHandler;
+import org.springframework.web.bind.annotation.RestControllerAdvice;
+
+import com.project.exception.ProjectException;
+
+@RestControllerAdvice
+public class GlobalException {
+	
+	@ExceptionHandler(value = MethodArgumentNotValidException.class)
+	public ResponseEntity<ErrorInfo> handleValidationException(MethodArgumentNotValidException exception){
+		ErrorInfo errorInfo = new ErrorInfo();
+		String message = exception.getBindingResult()
+		.getAllErrors()
+		.stream()
+		.map(error -> error.getDefaultMessage())
+		.collect(Collectors.joining(", "));
+		
+		errorInfo.setErrorMessage(message);
+		errorInfo.setErrorCode(HttpStatus.BAD_REQUEST.value());
+		errorInfo.setTimeStamp(LocalDateTime.now());
+		
+		return new ResponseEntity<>(errorInfo, HttpStatus.BAD_REQUEST);
+	}
+	
+	@ExceptionHandler(value = ProjectException.class)
+	public ResponseEntity<ErrorInfo> handleProjectException(ProjectException exception){
+		ErrorInfo errorInfo = new ErrorInfo();
+		
+		errorInfo.setErrorMessage(exception.getMessage());
+		errorInfo.setErrorCode(HttpStatus.BAD_REQUEST.value());
+		errorInfo.setTimeStamp(LocalDateTime.now());
+		
+		return new ResponseEntity<>(errorInfo, HttpStatus.BAD_REQUEST);
+	}
+
+	@ExceptionHandler(value = Exception.class)
+	public ResponseEntity<ErrorInfo> handleGeneralException(Exception exception){
+		ErrorInfo errorInfo = new ErrorInfo();
+		
+		errorInfo.setErrorMessage(exception.getMessage());
+		errorInfo.setErrorCode(HttpStatus.INTERNAL_SERVER_ERROR.value());
+		errorInfo.setTimeStamp(LocalDateTime.now());
+		
+		return new ResponseEntity<>(errorInfo, HttpStatus.INTERNAL_SERVER_ERROR);
+	}
+}
+```
+
+---
+
+### [Type.java (in ProjectServiceMS)](file:///c:/Users/DELL/Downloads/vmarimuthu%20(2)/vmarimuthu/ProjectServiceMS/src/main/java/com/project/utility/Type.java)
+```java
+package com.project.utility;
+
+public enum Type {
+	BUG, TASK, STORY
+}
+```
+
+---
+
+### [Status.java (in ProjectServiceMS)](file:///c:/Users/DELL/Downloads/vmarimuthu%20(2)/vmarimuthu/ProjectServiceMS/src/main/java/com/project/utility/Status.java)
+```java
+package com.project.utility;
+
+public enum Status {
+	TO_DO, DEVELOPMENT, TESTING, COMPLETED, DONE
+}
+```
+
+---
+
+## 3. IssueServiceMS
+
+### [ErrorInfo.java (in IssueServiceMS)](file:///c:/Users/DELL/Downloads/vmarimuthu%20(2)/vmarimuthu/IssueServiceMS/src/main/java/com/issue/utility/ErrorInfo.java)
+```java
+package com.issue.utility;
+
+import java.time.LocalDateTime;
+import lombok.Data;
+
+@Data
+public class ErrorInfo {
+	private String errorMessage;
+	private Integer errorCode;
+	private LocalDateTime timeStamp;
+}
+```
+
+---
+
+### [GlobalException.java (in IssueServiceMS)](file:///c:/Users/DELL/Downloads/vmarimuthu%20(2)/vmarimuthu/IssueServiceMS/src/main/java/com/issue/utility/GlobalException.java)
+```java
+package com.issue.utility;
+
+import java.time.LocalDateTime;
+import java.util.stream.Collectors;
+
+import org.springframework.http.HttpStatus;
+import org.springframework.http.ResponseEntity;
+import org.springframework.web.bind.MethodArgumentNotValidException;
+import org.springframework.web.bind.annotation.ExceptionHandler;
+import org.springframework.web.bind.annotation.RestControllerAdvice;
+
+import com.issue.exception.IssueException;
+
+@RestControllerAdvice
+public class GlobalException {
+	
+	@ExceptionHandler(value = MethodArgumentNotValidException.class)
+	public ResponseEntity<ErrorInfo> handleValidationException(MethodArgumentNotValidException exception){
+		ErrorInfo errorInfo = new ErrorInfo();
+		String message = exception.getBindingResult()
+		.getAllErrors()
+		.stream()
+		.map(error -> error.getDefaultMessage())
+		.collect(Collectors.joining(", "));
+		
+		errorInfo.setErrorMessage(message);
+		errorInfo.setErrorCode(HttpStatus.BAD_REQUEST.value());
+		errorInfo.setTimeStamp(LocalDateTime.now());
+		
+		return new ResponseEntity<>(errorInfo, HttpStatus.BAD_REQUEST);
+	}
+	
+	@ExceptionHandler(value = IssueException.class)
+	public ResponseEntity<ErrorInfo> handleIssueException(IssueException exception){
+		ErrorInfo errorInfo = new ErrorInfo();
+		
+		errorInfo.setErrorMessage(exception.getMessage());
+		errorInfo.setErrorCode(HttpStatus.BAD_REQUEST.value());
+		errorInfo.setTimeStamp(LocalDateTime.now());
+		
+		return new ResponseEntity<>(errorInfo, HttpStatus.BAD_REQUEST);
+	}
+
+	@ExceptionHandler(value = Exception.class)
+	public ResponseEntity<ErrorInfo> handleGeneralException(Exception exception){
+		ErrorInfo errorInfo = new ErrorInfo();
+		
+		errorInfo.setErrorMessage(exception.getMessage());
+		errorInfo.setErrorCode(HttpStatus.INTERNAL_SERVER_ERROR.value());
+		errorInfo.setTimeStamp(LocalDateTime.now());
+		
+		return new ResponseEntity<>(errorInfo, HttpStatus.INTERNAL_SERVER_ERROR);
+	}
+}
+```
+
+---
+
+### [IssueDTO.java (in IssueServiceMS)](file:///c:/Users/DELL/Downloads/vmarimuthu%20(2)/vmarimuthu/IssueServiceMS/src/main/java/com/issue/model/IssueDTO.java)
+```java
+package com.issue.model;
+
+import java.time.LocalDate;
+
+import com.issue.utility.Priority;
+import com.issue.utility.Status;
+import com.issue.utility.Type;
+
+import jakarta.validation.constraints.Max;
+import jakarta.validation.constraints.Min;
+import jakarta.validation.constraints.NotNull;
+import jakarta.validation.constraints.Pattern;
+import jakarta.validation.constraints.Size;
+import lombok.Data;
+
+@Data
+public class IssueDTO {
+	
+	private Integer id;
+
+	@NotNull(message = "Summary cannot be null")
+	@Size(min = 5, max = 150, message = "Summary must be between 5 and 150 characters")
+	@Pattern(regexp = "^[a-zA-Z0-9\\s\\-/.|]+$", message = "Summary contains invalid characters. Only alphanumeric and {-, /, |, .} are allowed")
+	private String summary;
+	
+	@Size(max = 500, message = "Description cannot exceed 500 characters")
+	private String description;
+	
+	@NotNull(message = "Project ID cannot be null")
+	private Integer project;
+	
+	@NotNull(message = "Assignee cannot be null")
+	private Integer assignee;
+	
+	@NotNull(message = "Creator User ID (createdBy) cannot be null")
+	private Integer createdBy;
+	
+	private LocalDate createdOn;
+	private LocalDate lastUpdated;
+	
+	@Pattern(regexp = "^[1-9][0-9]*$", message = "Sprint must be a positive number")
+	private String sprint;
+	
+	@Min(value = 2, message = "Story point must be a prime number (minimum 2)")
+	@Max(value = 100, message = "Story points cannot exceed 100")
+	private Integer storyPoint;
+	
+	@Size(max = 100, message = "Tags cannot exceed 100 characters")
+	private String tags;
+	
+	@NotNull(message = "Priority cannot be null")
+	private Priority priority;
+	
+	@NotNull(message = "Status cannot be null")
+	private Status status;
+	
+	@NotNull(message = "Issue type cannot be null")
+	private Type type;
+}
+```
+
+---
+
+### [IssueServiceImpl.java](file:///c:/Users/DELL/Downloads/vmarimuthu%20(2)/vmarimuthu/IssueServiceMS/src/main/java/com/issue/service/IssueServiceImpl.java)
+```java
+package com.issue.service;
+
+import java.time.LocalDate;
+import java.util.ArrayList;
+import java.util.List;
+import java.util.Optional;
+
+import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.stereotype.Service;
+
+import com.issue.entity.Issue;
+import com.issue.exception.IssueException;
+import com.issue.model.IssueDTO;
+import com.issue.repository.IssueRepository;
+
+@Service
+public class IssueServiceImpl implements IssueService {
+	@Autowired
+	private IssueRepository issueRepository;
+
+	private boolean isPrime(Integer n) {
+		if (n == null || n <= 1) return false;
+		for (int i = 2; i <= Math.sqrt(n); i++) {
+			if (n % i == 0) return false;
+		}
+		return true;
+	}
+	
+	@Override
+	public IssueDTO getIssueById(Integer id) throws IssueException {
+		Optional<Issue> optional = issueRepository.findById(id);
+		Issue issue = optional.orElseThrow(() -> new IssueException("Issue not found with ID: " + id));
+		
+		IssueDTO dto = new IssueDTO();
+		dto.setId(issue.getId());
+		dto.setSummary(issue.getSummary());
+		dto.setDescription(issue.getDescription());
+		dto.setProject(issue.getProject());
+		dto.setAssignee(issue.getAssignee());
+		dto.setCreatedBy(issue.getCreatedBy());
+		dto.setCreatedOn(issue.getCreatedOn());
+		dto.setLastUpdated(issue.getLastUpdated());
+		dto.setSprint(issue.getSprint());
+		dto.setStoryPoint(issue.getStoryPoint());
+		dto.setTags(issue.getTags());
+		dto.setPriority(issue.getPriority());
+		dto.setStatus(issue.getStatus());
+		dto.setType(issue.getType());
+		return dto;
+	}
+
+	@Override
+	public String createIssue(IssueDTO issueDTO) throws IssueException {
+		if (issueDTO.getStoryPoint() != null && !isPrime(issueDTO.getStoryPoint())) {
+			throw new IssueException("Story Point must be a prime number");
+		}
+
+		Issue issue = new Issue();
+		issue.setSummary(issueDTO.getSummary());
+		issue.setDescription(issueDTO.getDescription());
+		issue.setProject(issueDTO.getProject());
+		issue.setAssignee(issueDTO.getAssignee());
+		issue.setCreatedBy(issueDTO.getCreatedBy());
+		
+		issue.setCreatedOn(LocalDate.now());
+		issue.setLastUpdated(LocalDate.now());
+		
+		issue.setSprint(issueDTO.getSprint());
+		issue.setStoryPoint(issueDTO.getStoryPoint());
+		issue.setTags(issueDTO.getTags());
+		issue.setPriority(issueDTO.getPriority());
+		issue.setStatus(issueDTO.getStatus());
+		issue.setType(issueDTO.getType());
+
+		issueRepository.save(issue);
+		return "Issue created successfully with Issue ID: " + issue.getId();
+	}
+
+	@Override
+	public List<IssueDTO> getAllIssues() throws IssueException {
+		List<Issue> issuesList = issueRepository.findAll();
+		List<IssueDTO> dtoList = new ArrayList<>();
+		for (Issue issue : issuesList) {
+			IssueDTO dto = new IssueDTO();
+			dto.setId(issue.getId());
+			dto.setSummary(issue.getSummary());
+			dto.setDescription(issue.getDescription());
+			dto.setProject(issue.getProject());
+			dto.setAssignee(issue.getAssignee());
+			dto.setCreatedBy(issue.getCreatedBy());
+			dto.setCreatedOn(issue.getCreatedOn());
+			dto.setLastUpdated(issue.getLastUpdated());
+			dto.setSprint(issue.getSprint());
+			dto.setStoryPoint(issue.getStoryPoint());
+			dto.setTags(issue.getTags());
+			dto.setPriority(issue.getPriority());
+			dto.setStatus(issue.getStatus());
+			dto.setType(issue.getType());
+			dtoList.add(dto);
+		}
+		return dtoList;
+	}
+
+	@Override
+	public String updateIssue(Integer id, IssueDTO issueDTO) throws IssueException {
+		Optional<Issue> optional = issueRepository.findById(id);
+		Issue issue = optional.orElseThrow(() -> new IssueException("Issue not found with ID: " + id));
+
+		if (issueDTO.getStoryPoint() != null && !isPrime(issueDTO.getStoryPoint())) {
+			throw new IssueException("Story Point must be a prime number");
+		}
+
+		if (issueDTO.getSummary() != null) issue.setSummary(issueDTO.getSummary());
+		if (issueDTO.getDescription() != null) issue.setDescription(issueDTO.getDescription());
+		if (issueDTO.getProject() != null) issue.setProject(issueDTO.getProject());
+		if (issueDTO.getAssignee() != null) issue.setAssignee(issueDTO.getAssignee());
+		if (issueDTO.getCreatedBy() != null) issue.setCreatedBy(issueDTO.getCreatedBy());
+		if (issueDTO.getSprint() != null) issue.setSprint(issueDTO.getSprint());
+		if (issueDTO.getStoryPoint() != null) issue.setStoryPoint(issueDTO.getStoryPoint());
+		if (issueDTO.getTags() != null) issue.setTags(issueDTO.getTags());
+		if (issueDTO.getPriority() != null) issue.setPriority(issueDTO.getPriority());
+		if (issueDTO.getStatus() != null) issue.setStatus(issueDTO.getStatus());
+		if (issueDTO.getType() != null) issue.setType(issueDTO.getType());
+		
+		issue.setLastUpdated(LocalDate.now());
+		issueRepository.save(issue);
+
+		return "Issue details updated successfully for ID: " + id;
+	}
+	
+	@Override
+	public List<IssueDTO> getIssuesByAssigneeId(Integer assigneeId) throws IssueException {
+		List<Issue> issuesList = issueRepository.findByAssignee(assigneeId);
+		List<IssueDTO> dtoList = new ArrayList<>();
+		for (Issue issue : issuesList) {
+			IssueDTO dto = new IssueDTO();
+			dto.setId(issue.getId());
+			dto.setSummary(issue.getSummary());
+			dto.setDescription(issue.getDescription());
+			dto.setProject(issue.getProject());
+			dto.setAssignee(issue.getAssignee());
+			dto.setCreatedBy(issue.getCreatedBy());
+			dto.setCreatedOn(issue.getCreatedOn());
+			dto.setLastUpdated(issue.getLastUpdated());
+			dto.setSprint(issue.getSprint());
+			dto.setStoryPoint(issue.getStoryPoint());
+			dto.setTags(issue.getTags());
+			dto.setPriority(issue.getPriority());
+			dto.setStatus(issue.getStatus());
+			dto.setType(issue.getType());
+			dtoList.add(dto);
+		}
+		return dtoList;
+	}
+	
+	@Override
+	public List<IssueDTO> getIssuesByProjectId(Integer projectId) throws IssueException {
+	    List<Issue> issuesList = issueRepository.findByProject(projectId);
+	    List<IssueDTO> dtoList = new ArrayList<>();
+	    for (Issue issue : issuesList) {
+	        IssueDTO dto = new IssueDTO();
+	        dto.setId(issue.getId());
+	        dto.setSummary(issue.getSummary());
+	        dto.setDescription(issue.getDescription());
+	        dto.setProject(issue.getProject());
+	        dto.setAssignee(issue.getAssignee());
+	        dto.setCreatedBy(issue.getCreatedBy());
+	        dto.setCreatedOn(issue.getCreatedOn());
+	        dto.setLastUpdated(issue.getLastUpdated());
+	        dto.setSprint(issue.getSprint());
+	        dto.setStoryPoint(issue.getStoryPoint());
+	        dto.setTags(issue.getTags());
+	        dto.setPriority(issue.getPriority());
+	        dto.setStatus(issue.getStatus());
+	        dto.setType(issue.getType());
+	        dtoList.add(dto);
+	    }
+	    return dtoList;
+	}
+
+	@Override
+	public List<IssueDTO> getIssuesByOwnerId(Integer ownerId) throws IssueException {
+	    List<Issue> issuesList = issueRepository.findByCreatedBy(ownerId);
+	    List<IssueDTO> dtoList = new ArrayList<>();
+	    for (Issue issue : issuesList) {
+	        IssueDTO dto = new IssueDTO();
+	        dto.setId(issue.getId());
+	        dto.setSummary(issue.getSummary());
+	        dto.setDescription(issue.getDescription());
+	        dto.setProject(issue.getProject());
+	        dto.setAssignee(issue.getAssignee());
+	        dto.setCreatedBy(issue.getCreatedBy());
+	        dto.setCreatedOn(issue.getCreatedOn());
+	        dto.setLastUpdated(issue.getLastUpdated());
+	        dto.setSprint(issue.getSprint());
+	        dto.setStoryPoint(issue.getStoryPoint());
+	        dto.setTags(issue.getTags());
+	        dto.setPriority(issue.getPriority());
+	        dto.setStatus(issue.getStatus());
+	        dto.setType(issue.getType());
+	        dtoList.add(dto);
+	    }
+	    return dtoList;
+	}
+}
+```
+
+---
+
+### [IssueController.java](file:///c:/Users/DELL/Downloads/vmarimuthu%20(2)/vmarimuthu/IssueServiceMS/src/main/java/com/issue/controller/IssueController.java)
+```java
+package com.issue.controller;
+
+import java.util.List;
+
+import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.http.HttpStatus;
+import org.springframework.http.ResponseEntity;
+import org.springframework.web.bind.annotation.CrossOrigin;
+import org.springframework.web.bind.annotation.GetMapping;
+import org.springframework.web.bind.annotation.PathVariable;
+import org.springframework.web.bind.annotation.PostMapping;
+import org.springframework.web.bind.annotation.PutMapping;
+import org.springframework.web.bind.annotation.RequestBody;
+import org.springframework.web.bind.annotation.RequestMapping;
+import org.springframework.web.bind.annotation.RestController;
+
+import com.issue.exception.IssueException;
+import com.issue.model.IssueDTO;
+import com.issue.service.IssueService;
+
+import jakarta.validation.Valid;
+
+@RestController
+@CrossOrigin(origins = "*")
+@RequestMapping({"/api/v1/issues", "/api/issues"})
+public class IssueController {
+	
+	@Autowired
+	private IssueService issueService;
+
+	@GetMapping("/{id}")
+	public ResponseEntity<IssueDTO> getIssueById(@PathVariable Integer id) throws IssueException {
+		IssueDTO issueDTO = issueService.getIssueById(id);
+		return new ResponseEntity<>(issueDTO, HttpStatus.OK);
+	}
+
+	@PostMapping
+	public ResponseEntity<String> createIssue(@Valid @RequestBody IssueDTO issueDTO) throws IssueException {
+		String message = issueService.createIssue(issueDTO);
+		return new ResponseEntity<>(message, HttpStatus.CREATED);
+	}
+
+	@GetMapping
+	public ResponseEntity<List<IssueDTO>> getAllIssues() throws IssueException {
+		List<IssueDTO> issues = issueService.getAllIssues();
+		return new ResponseEntity<>(issues, HttpStatus.OK);
+	}
+
+	@PutMapping("/{id}")
+	public ResponseEntity<String> updateIssue(@PathVariable Integer id, @RequestBody IssueDTO issueDTO) throws IssueException {
+		String message = issueService.updateIssue(id, issueDTO);
+		return new ResponseEntity<>(message, HttpStatus.OK);
+	}
+	
+	@GetMapping("/assignee/{assigneeId}")
+	public ResponseEntity<List<IssueDTO>> getIssuesByAssigneeId(@PathVariable Integer assigneeId) throws IssueException {
+		List<IssueDTO> issues = issueService.getIssuesByAssigneeId(assigneeId);
+		return new ResponseEntity<>(issues, HttpStatus.OK);
+	}
+	
+	@GetMapping("/project/{projectId}")
+	public ResponseEntity<List<IssueDTO>> getIssuesByProjectId(@PathVariable Integer projectId) throws IssueException {
+	    List<IssueDTO> issues = issueService.getIssuesByProjectId(projectId);
+	    return new ResponseEntity<>(issues, HttpStatus.OK);
+	}
+
+	@GetMapping("/owner/{ownerId}")
+	public ResponseEntity<List<IssueDTO>> getIssuesByOwnerId(@PathVariable Integer ownerId) throws IssueException {
+	    List<IssueDTO> issues = issueService.getIssuesByOwnerId(ownerId);
+	    return new ResponseEntity<>(issues, HttpStatus.OK);
+	}
+
+}
+```
+
+---
+
+### [Type.java (in IssueServiceMS)](file:///c:/Users/DELL/Downloads/vmarimuthu%20(2)/vmarimuthu/IssueServiceMS/src/main/java/com/issue/utility/Type.java)
+```java
+package com.issue.utility;
+
+public enum Type {
+	BUG, TASK, STORY
+}
+```
+
+---
+
+### [Status.java (in IssueServiceMS)](file:///c:/Users/DELL/Downloads/vmarimuthu%20(2)/vmarimuthu/IssueServiceMS/src/main/java/com/issue/utility/Status.java)
+```java
+package com.issue.utility;
+
+public enum Status {
+	TO_DO, DEVELOPMENT, TESTING, COMPLETED, DONE
+}
+```
+
+---
+
+## 4. APIGateway
+
+### [application.properties (in APIGateway)](file:///c:/Users/DELL/Downloads/vmarimuthu%20(2)/vmarimuthu/APIGateway/src/main/resources/application.properties)
+```properties
+spring.application.name=APIGateway
+server.port=9000
+
+eureka.client.service-url.defaultZone=http://localhost:8761/eureka
+
+# Global CORS Configuration for React Frontend
+spring.cloud.gateway.globalcors.cors-configurations.[/**].allowedOrigins=*
+spring.cloud.gateway.globalcors.cors-configurations.[/**].allowedMethods=GET,POST,PUT,DELETE,OPTIONS
+spring.cloud.gateway.globalcors.cors-configurations.[/**].allowedHeaders=*
+
+# Service Routes (supports both /api/... and /api/v1/...)
+spring.cloud.gateway.routes[0].id=UserServiceMS
+spring.cloud.gateway.routes[0].uri=lb://UserServiceMS
+spring.cloud.gateway.routes[0].predicates[0]=Path=/api/users/**,/api/v1/users/**
+ 
+spring.cloud.gateway.routes[1].id=IssueServiceMS
+spring.cloud.gateway.routes[1].uri=lb://IssueServiceMS
+spring.cloud.gateway.routes[1].predicates[0]=Path=/api/issues/**,/api/v1/issues/**
+
+spring.cloud.gateway.routes[2].id=ProjectServiceMS
+spring.cloud.gateway.routes[2].uri=lb://ProjectServiceMS
+spring.cloud.gateway.routes[2].predicates[0]=Path=/api/projects/**,/api/v1/projects/**
+```
+
+---
+
+Whenever you upload your React frontend code, share it and we will connect and align it with these backend endpoints.
